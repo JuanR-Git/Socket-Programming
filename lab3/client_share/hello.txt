@@ -1,0 +1,1 @@
+Hello from the server! This is a small test file for the 4DN4 Lab 3 file sharing application.

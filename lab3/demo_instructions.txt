@@ -1,0 +1,140 @@
+Demo Instructions for COMPENG 4DN4 Lab 3
+==========================================
+
+All terminals should be cd'd into the lab3 directory.
+Replace "python" with your system's Python 3 command if needed (e.g., py, python3).
+
+
+==========================================================================
+DEMO ITEM 11: Multiple Concurrent Client Connections
+==========================================================================
+
+You need 3 terminals open.
+
+--- Terminal 1 (Server) ---
+
+    python file_sharing.py -r server
+
+    You should see:
+      - Files currently available for sharing
+      - "Listening for service discovery messages on SDP port 30000."
+      - "Listening for file sharing connections on port 30001."
+
+
+--- Terminal 2 (Client A) ---
+
+    python file_sharing.py -r client
+
+    FileSharing> connect 127.0.0.1 30001
+    Connected> rlist
+
+    Leave this terminal open and connected. Do NOT type bye.
+
+
+--- Terminal 3 (Client B) ---
+
+    python file_sharing.py -r client
+
+    FileSharing> connect 127.0.0.1 30001
+    Connected> rlist
+    Connected> put upload_test.txt
+    Connected> rlist
+
+    You should see upload_test.txt now listed on the server.
+
+
+--- Back to Terminal 2 (Client A) ---
+
+    Connected> rlist
+
+    Client A should now also see upload_test.txt in the remote listing,
+    proving both connections are live simultaneously.
+
+
+--- What to show the TA ---
+
+    On the server terminal, you should see TWO separate
+    "Connection received from ..." lines with different port numbers.
+    Both clients can issue commands independently at the same time.
+
+
+==========================================================================
+DEMO ITEM 13: No Partial File Remnant on Server Crash During Upload
+==========================================================================
+
+You need 2 terminals open, plus a large test file.
+
+
+--- Preparation: Create a large test file (run once, any terminal) ---
+
+    python -c "with open('client_share/big_file.bin','wb') as f: f.write(b'X'*100_000_000)"
+
+    This creates a 100 MB file. The file needs to be large enough that
+    the upload takes noticeable time so you can kill the server mid-transfer.
+    If 100 MB transfers too fast, increase to 500_000_000 (500 MB).
+
+
+--- Step 1: Start the server (Terminal 1) ---
+
+    python file_sharing.py -r server
+
+    Note the files listed at startup. big_file.bin should NOT be there.
+
+
+--- Step 2: Start the client and begin upload (Terminal 2) ---
+
+    python file_sharing.py -r client
+
+    FileSharing> connect 127.0.0.1 30001
+    Connected> put big_file.bin
+
+
+--- Step 3: Kill the server mid-transfer (Terminal 1) ---
+
+    As soon as the client starts the put command, QUICKLY press Ctrl+C
+    in the server terminal (Terminal 1) to kill it mid-upload.
+
+
+--- Step 4: Verify no partial file remains ---
+
+    In any terminal, list the server share directory:
+
+        ls server_share/
+
+    OR restart the server:
+
+        python file_sharing.py -r server
+
+    The startup file listing should NOT show big_file.bin or .tmp_big_file.bin.
+    The temp-file strategy in the code ensures that no partial file remnant
+    is left in the shared directory when the server crashes during upload.
+
+
+--- Why this works ---
+
+    The server writes uploaded data to a temporary file (.tmp_<filename>)
+    first. Only after the ENTIRE file is received does it rename the temp
+    file to the final filename. If the server crashes mid-transfer, the
+    OS cleans up the temp file handle, and on next startup there is no
+    corrupted file in the shared directory.
+
+
+==========================================================================
+IN-LAB DEMO (BSB 238 - Two or more laptops)
+==========================================================================
+
+Same steps as above, but:
+
+  - Run the server on one laptop.
+  - Run the client(s) on the other laptop(s).
+  - All laptops must be connected to the 4DN4 router in BSB 238.
+  - Use "scan" to discover the server's LAN IP address.
+  - For "connect", use the server's LAN IP shown in the scan output:
+
+        FileSharing> scan
+        Juan's File Sharing Service found at IP address/port 192.168.X.X, 30001
+
+        FileSharing> connect 192.168.X.X 30001
+
+  - For Demo Item 11, use two separate client laptops connecting
+    to the same server laptop.

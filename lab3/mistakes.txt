@@ -1,0 +1,80 @@
+Three Mistakes Encountered During Implementation
+================================================
+
+Mistake 1: Not receiving the full file during large transfers
+-------------------------------------------------------------
+Observation: When testing file transfers with larger files (e.g., images or videos),
+the downloaded file was corrupted or truncated. The client would finish the get
+command without error, but the file size was smaller than expected and the file
+could not be opened.
+
+Cause: The initial implementation used a single socket.recv() call to receive the
+entire file data after reading the file size header. However, TCP is a stream
+protocol and recv() does not guarantee that all data will arrive in a single call -
+it may return only a partial chunk, especially for larger payloads.
+
+Fix: Replaced the single recv() call with a loop that continues calling recv()
+and accumulating data into a bytearray until the total number of bytes received
+equals the expected file size:
+
+    while received < file_size:
+        chunk = self.tcp_socket.recv(min(RECV_SIZE, file_size - received))
+        if not chunk:
+            break
+        file_data += chunk
+        received += len(chunk)
+
+This ensured that the complete file was received regardless of how TCP fragmented
+the data across multiple packets.
+
+
+Mistake 2: Service discovery broadcast not reaching the server
+--------------------------------------------------------------
+Observation: When running the scan command from the client, no service was being
+found even though the server was running and listening. The server never printed
+any indication that it received a service discovery message. This was only an
+issue when the client and server were on different machines on the same LAN.
+
+Cause: The UDP socket on the client side was missing the SO_BROADCAST socket
+option. Without this flag, the operating system blocks outgoing broadcast packets
+(sent to 255.255.255.255) by default. The socket would silently fail to send the
+broadcast, so the server never received the SERVICE DISCOVERY message.
+
+Fix: Added the SO_BROADCAST socket option on the client UDP socket before sending:
+
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+After this change, the broadcast was successfully transmitted across the local
+network and the server responded with its service name.
+
+
+Mistake 3: Partial file left on server when upload was interrupted
+-----------------------------------------------------------------
+Observation: During testing of the put command, we simulated a server crash
+(Ctrl+C) while a large file was being uploaded. After restarting the server, the
+shared directory contained a partially written file that was smaller than the
+original. This corrupted file would then be served to other clients via the get
+command.
+
+Cause: The original implementation wrote incoming data directly to the final
+destination file path in the server's shared directory. If the connection dropped
+or the server was interrupted mid-transfer, the incomplete file remained in the
+directory with the correct filename, making it appear as a valid shared file.
+
+Fix: Implemented a temp-file strategy where uploaded data is first written to a
+temporary file (prefixed with ".tmp_") in the shared directory. Only after the
+entire file has been successfully received is the temp file renamed to the final
+filename using os.rename(). If the transfer fails at any point, the temp file is
+cleaned up in the except/finally block:
+
+    temp_filepath = os.path.join(SERVER_SHARE_DIR, ".tmp_" + filename)
+    filepath = os.path.join(SERVER_SHARE_DIR, filename)
+    try:
+        # ... receive and write to temp_filepath ...
+        os.rename(temp_filepath, filepath)
+    except Exception:
+        if os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
+
+This ensures no partial file remnant remains in the shared directory if the server
+exits or the connection is lost during an upload.
